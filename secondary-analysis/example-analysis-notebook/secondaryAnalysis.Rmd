@@ -1,0 +1,809 @@
+---
+title: "Transient Diets I + II analysis - RNA-seq & Record-seq"
+output:
+    
+  github_document:
+    toc: yes
+    toc_depth: 2
+    
+  html_notebook:
+    df_print: paged
+    toc: yes
+    toc_depth: 2
+    toc_float: yes
+    number_sections: yes
+    code_folding: hide
+    theme: darkly
+    highlight: breezedark
+    
+---
+# Introduction 
+
+This R notebook implements the analysis of the Record-seq and RNA-seq readout of the transient diet experiments described in 'Transcriptional Recordings in the gut' manuscript. The following files need to be stored in the directory `data` within the working directory: 
+
+    transient-diet/
+        secondaryAnalysis.Rmd
+        data/
+            transientDiet1_Recordseq_genomemapping.txt
+            transientDiet1_Recordseq_designmatrix.txt
+            transientDiet1_RNAseq_genomemapping.txt
+            transientDiet1_RNAseq_designmatrix.txt
+            transientDiet2_Recordseq_genomemapping.txt
+            transientDiet2_Recordseq_plasmidmapping.txt
+            transientDiet2_Recordseq_designmatrix.txt
+            transientDiet2_RNAseq_genomemapping.txt
+            transientDiet2_RNAseq_designmatrix.txt
+            Chow.Fat.pathway.txt
+            Chow.Starch.pathway.txt
+            Fat.Starch.pathway.txt
+        
+# Libraries
+
+The `recoRdseq` package and dependencies are required for this analysis, and the fantastic `patchwork` package is used for visualization. 
+
+```{r message=FALSE, warning=FALSE}
+if(!require(devtools)){
+  install.packages("devtools")
+}
+library(devtools)
+if(!require(eulerr)){
+  install.packages("eulerr")
+}
+library(eulerr)
+if(!require(plyr)){
+  install.packages("plyr")
+}
+library(plyr)
+if(!require(recoRdseq)){
+  install_github("plattlab/Transcriptional-Recording", subdir="recoRdseq")
+}
+if(!require(factoextra)){
+  install.packages("factoextra")
+}
+library(factoextra)
+if(!require(patchwork)){
+  install.packages('patchwork')
+}
+if(!require(ggrepel)){
+  install.packages('ggrepel')
+}
+library(recoRdseq)
+library(patchwork)
+library(stringr)
+library(ggrepel)
+colour_code = list(
+  Diet = c(Chow = "#538bce", Fat="#ed915c", Starch='#42bb7f')) # we set a consistent color scheme for the three diet groups
+
+theme_pub<-theme_minimal()+
+  theme(legend.position="bottom", legend.justification="center", legend.margin=margin(0,0,0,0),legend.box.margin=margin(-10,-10,-10,-10),plot.title = element_text(hjust = 0.5), legend.spacing.y =  unit(0, 'mm'), legend.box='vertical', legend.key.size = unit(0.1, "cm"),legend.key.width = unit(0.1,"cm"), legend.text=element_text(size=5), text = element_text(size=5), panel.grid.minor = element_blank(), axis.text = element_text(size=5, colour='black'), panel.grid.major = element_line(size = 0.24, colour='gray1', linetype = 2)) # we set a consistent theme for ggplot objects
+
+custom.config = umap.defaults
+custom.config$random_state = 2
+```
+# Transient Diet 1
+
+Data for the transient diet experiment with 14 days is analyzed first.
+
+## Importing and pre-processing data for transient diet 1
+
+  We import the data matrices for both Record-seq and RNA-seq, filter them for lowly expressed genes as well as outlier samples with low cumulative counts, and use vst from _DESeq2_ to normalize and transform the data. 
+
+```{r message=FALSE, warning=FALSE}
+rec1<-as.data.frame(read.table("data/transientDiet1_Recordseq_genomealigning.txt", header = TRUE))
+rec1d<-as.data.frame(read.table("data/transientDiet1_Recordseq_designmatrix.txt", header = TRUE))
+DEList<-recoRdseq.preprocess(rec1, rec1d, minCountsPerSample = 10000)
+rec1<-DEList[[1]]
+rec1d<-DEList[[2]]
+rec1d<-rec1d[rec1d$Day>1,]
+rec1<-rec1[,rownames(rec1d)]
+rec1_tf<-recoRdseq.transform(rec1, rec1d,transformation = 'vst')
+
+rna1<-as.data.frame(read.table("data/transientDiet1_RNAseq_genomealigning.txt", header = TRUE))
+rna1d<-as.data.frame(read.table("data/transientDiet1_RNAseq_designmatrix.txt", header = TRUE))
+DEList<-recoRdseq.preprocess(rna1, rna1d, minCountsPerSample = 100000)
+rna1<-DEList[[1]]
+rna1d<-DEList[[2]]
+rna1_tf<-recoRdseq.transform(rna1, rna1d)
+rnadays<-unique(rna1d$Day)
+rna1_day14<-as.data.frame(read.table("data/transientDiet1_day14_RNAseq_genomealigning.txt", header = TRUE))
+rna1d_day14<-as.data.frame(read.table("data/transientDiet1_day14_RNAseq_designmatrix.txt", header = TRUE))
+rna1d_day14<-rna1d_day14[,1:3]
+DEList<-recoRdseq.preprocess(rna1_day14, rna1d_day14, minCountsPerSample = 100000)
+rna1_day14<-DEList[[1]]
+rna1d_day14<-DEList[[2]]
+rna1_day14tf<-recoRdseq.transform(rna1_day14, rna1d_day14, transformation = 'vst')
+
+```
+
+## Data exploration
+  We use Principal Component analysis and UMAP for dimensionality reduction and exploring clusters in an unsupervised fashion in our data.  We first generate these for the entire dataset from Record-seq:
+
+```{r message=FALSE, warning=FALSE,  fig.height=2.2, fig.width=3}
+rec1sds <- rowSds(as.matrix(rec1_tf))
+o <- order(rec1sds, decreasing = TRUE)
+rec1PCA<-prcomp(t(rec1_tf[o[1:500],]))
+pca_stat<-summary(rec1PCA)
+pca_variance<-pca_stat$importance[2,]
+rec1PCA<-as.data.frame(rec1PCA$x)
+rec1PCA$Diet<-rec1d$Diet
+rec1PCA$Day<-factor(rec1d$Day, levels = 1:20)
+rec1PCAplot<-ggplot(rec1PCA, aes(x=PC1, y=PC2, fill=Diet,  size=Day))+geom_point(pch=21, colour='#000000', stroke=0.25)+theme_pub+scale_size_discrete(range=c(1,2.5))+geom_hline(yintercept = 0, size=0.24)+scale_fill_manual(values = as.vector(colour_code$Diet))+geom_vline(xintercept = 0, size=0.24)+ guides(fill = guide_legend(override.aes = list(size=2)))+ylab(paste0("PC2 (", as.character(pca_variance[2]*100), "% variance explained)"))+xlab(paste0("PC1 (", as.character(pca_variance[1]*100), "% variance explained)"))+ggtitle(" PCA plot of Record-seq data - all days (transient diet 1)")
+
+
+rec1UMAP<-umap(rec1PCA[,1:(ncol(rec1PCA)-2)], custom.config)
+rec1UMAP<-as.data.frame(rec1UMAP$layout)
+rec1UMAP$Day<-factor(rec1d$Day, levels = 2:14)
+rec1UMAP$Diet<-rec1d$Diet
+colnames(rec1UMAP)[1:2]<-c('UMAP1','UMAP2')
+rec1UMAPplot<-ggplot(rec1UMAP, aes(x=UMAP1, y=UMAP2, fill=Diet,  size=Day))+geom_point(pch=21, colour='#000000', stroke=0.24)+theme_pub+scale_size_discrete(range=c(1,2.5))+geom_hline(yintercept = 0, size=0.24)+geom_vline(xintercept = 0, size=0.24)+ guides(fill = guide_legend(override.aes = list(size=2)))+scale_fill_manual(values = as.vector(colour_code$Diet))+ggtitle("UMAP plot for Record-seq data - all days (transient diet 1)")
+
+rec1PCAplot+rec1UMAPplot+plot_annotation(tag_levels = 'A')
+
+```
+
+  For a comparison between Record-seq and RNA-seq, we check if the diet groups can be classified using PCA on day 7 (the last day when the mice are fed different diets, before switching all mice to a 'Chow' diet)
+
+```{r message=FALSE, warning=FALSE, fig.height=2.2, fig.width=3}
+
+rec1d_day7<-rec1d[rec1d$Day==7,]
+rec1_day7<-rec1[, rownames(rec1d_day7)]
+rec1_day7tf<-recoRdseq.transform(rec1_day7, rec1d_day7)
+rec1_day7_sds <- rowSds(as.matrix(rec1_day7tf))
+o <- order(rec1_day7_sds, decreasing = TRUE)
+rec1_day7PCA<-prcomp(t(rec1_day7tf[o[1:500],]))
+pca_stat<-summary(rec1_day7PCA)
+pca_variance<-pca_stat$importance[2,]
+rec1_day7PCA<-as.data.frame(rec1_day7PCA$x)
+rec1_day7PCA$Diet<-rec1d_day7$Diet
+rec1_day7PCA$Day<-factor(rec1d_day7$Day, levels = c(7))
+rec1_day7PCAplot<-ggplot(rec1_day7PCA, aes(x=PC1, y=PC2, fill=Diet,  size=Day))+geom_point(pch=21, colour='#000000', stroke=0.25)+theme_pub+scale_size_discrete(range=c(2,2.5))+geom_hline(yintercept = 0, size=0.24)+scale_fill_manual(values = as.vector(colour_code$Diet))+geom_vline(xintercept = 0, size=0.24)+ guides(fill = guide_legend(override.aes = list(size=2)))+ylab(paste0("PC2 (", as.character(pca_variance[2]*100), "% variance explained)"))+xlab(paste0("PC1 (", as.character(pca_variance[1]*100), "% variance explained)"))+ggtitle(" PCA plot of Record-seq data on day 7 (transient diet 1)")
+
+rna1_sds <- rowSds(as.matrix(rna1_tf))
+o <- order(rna1_sds, decreasing = TRUE)
+rna1_PCA<-prcomp(t(rna1_tf[o[1:500],]))
+pca_stat<-summary(rna1_PCA)
+pca_variance<-pca_stat$importance[2,]
+rna1_PCA<-as.data.frame(rna1_PCA$x)
+rna1_PCA$Diet<-rna1d$Diet
+rna1_PCA$Day<-factor(rna1d$Day, levels = c(7))
+rna1_day7PCAplot<-ggplot(rna1_PCA, aes(x=PC1, y=PC2, fill=Diet,  size=Day))+geom_point(pch=21, colour='#000000', stroke=0.25)+theme_pub+scale_size_discrete(range=c(2,2.5))+geom_hline(yintercept = 0, size=0.24)+scale_fill_manual(values = as.vector(colour_code$Diet))+geom_vline(xintercept = 0, size=0.24)+ guides(fill = guide_legend(override.aes = list(size=2)))+ylab(paste0("PC2 (", as.character(pca_variance[2]*100), "% variance explained)"))+xlab(paste0("PC1 (", as.character(pca_variance[1]*100), "% variance explained)"))+ggtitle(" PCA plot of RNA-seq data on day 7 (transient diet 1) ")
+
+
+rna1_day7PCAplot+rec1_day7PCAplot+plot_annotation(tag_levels = 'A')
+
+```
+
+  Next, we check if Record-seq or RNA-seq can distinguish the samples on day 14 (7 days after switching all samples to Chow diet).
+
+```{r message=FALSE, warning=FALSE, fig.height=2.2, fig.width=3}
+
+rec1d_day14<-rec1d[rec1d$Day==14,]
+rec1_day14<-rec1[, rownames(rec1d_day14)]
+rec1_day14tf<-recoRdseq.transform(rec1_day14, rec1d_day14)
+rec1_day14_sds <- rowSds(as.matrix(rec1_day14tf))
+o <- order(rec1_day14_sds, decreasing = TRUE)
+rec1_day14PCA<-prcomp(t(rec1_day14tf[o[1:500],]))
+pca_stat<-summary(rec1_day14PCA)
+pca_variance<-pca_stat$importance[2,]
+rec1_day14PCA<-as.data.frame(rec1_day14PCA$x)
+rec1_day14PCA$Diet<-rec1d_day14$Diet
+rec1_day14PCA$Day<-factor(rec1d_day14$Day, levels = c(14))
+rec1_day14PCAplot<-ggplot(rec1_day14PCA, aes(x=PC1, y=PC2, fill=Diet,  size=Day))+geom_point(pch=21, colour='#000000', stroke=0.25)+theme_pub+scale_size_discrete(range=c(2,2.5))+geom_hline(yintercept = 0, size=0.24)+scale_fill_manual(values = as.vector(colour_code$Diet))+geom_vline(xintercept = 0, size=0.24)+ guides(fill = guide_legend(override.aes = list(size=2)))+ylab(paste0("PC2 (", as.character(pca_variance[2]*100), "% variance explained)"))+xlab(paste0("PC1 (", as.character(pca_variance[1]*100), "% variance explained)"))+ggtitle(" PCA plot of Record-seq data on day 14 (transient diet 1)")
+
+rna1_day14_sds <- rowSds(as.matrix(rna1_day14tf))
+o <- order(rna1_day14_sds, decreasing = TRUE)
+rna1_day14_PCA<-prcomp(t(rna1_day14tf[o[1:500],]))
+pca_stat<-summary(rna1_day14_PCA)
+pca_variance<-pca_stat$importance[2,]
+rna1_day14_PCA<-as.data.frame(rna1_day14_PCA$x)
+rna1_day14_PCA$Diet<-rna1d_day14$Diet
+rna1_day14_PCA$Day<-factor(rna1d_day14$Day, levels = c(14))
+rna1_day14PCAplot<-ggplot(rna1_day14_PCA, aes(x=PC1, y=PC2, fill=Diet,  size=Day))+geom_point(pch=21, colour='#000000', stroke=0.25)+theme_pub+scale_size_discrete(range=c(2,2.5))+geom_hline(yintercept = 0, size=0.24)+scale_fill_manual(values = as.vector(colour_code$Diet))+geom_vline(xintercept = 0, size=0.24)+ guides(fill = guide_legend(override.aes = list(size=2)))+ylab(paste0("PC2 (", as.character(pca_variance[2]*100), "% variance explained)"))+xlab(paste0("PC1 (", as.character(pca_variance[1]*100), "% variance explained)"))+ggtitle(" PCA plot of RNA-seq data on day 14 (transient diet 1) ")
+
+
+rna1_day14PCAplot+rec1_day14PCAplot+plot_annotation(tag_levels = 'A')
+
+```
+
+
+## Discovery of differentially expressed genes (DEGs):
+  We identify DEGs for day 7 (since this is the final day when the mice are fed separate diets, and RNA-seq is also available for this day). We define DEGs as genes identified to be significantly differentially expressed using a threshold (padj < 0.05) by both DESeq2 and edgeR (multiple testing, since we have 3 groups). 
+
+```{r message=FALSE, warning=FALSE}
+rec1.deseq<-recoRdseq.DE(rec1_day7, rec1d_day7, tool='DESeq2')
+rec1.edger<-recoRdseq.DE(rec1_day7, rec1d_day7, tool='edgeR')
+rec1.deseq.genes<-recoRdseq.filterDEG(rec1.deseq, p = 0.05)
+rec1.edger.genes<-recoRdseq.filterDEG(rec1.edger, p = 0.05)
+rec1.DEG<-rec1.deseq[intersect(rec1.deseq.genes, rec1.edger.genes), c(1,7, which(grepl('log2FoldChange', colnames(rec1.deseq))))]
+rec1.DEG$geneID<-as.character(rec1.DEG$geneID)
+rec1.DEG<-rec1.DEG[order(rec1.DEG$padj),]
+rec1.DEG$geneID<-as.character(rec1.DEG$geneID)
+rna1.deseq<-recoRdseq.DE(rna1, rna1d, tool='DESeq2')
+rna1.edger<-recoRdseq.DE(rna1, rna1d, tool='edgeR')
+rna1.deseq.genes<-recoRdseq.filterDEG(rna1.deseq, p = 0.05)
+rna1.edger.genes<-recoRdseq.filterDEG(rna1.edger, p = 0.05)
+rna1.DEG<-rna1.deseq[intersect(rna1.deseq.genes, rna1.edger.genes), c(1,7, which(grepl('log2FoldChange', colnames(rna1.deseq))))]
+rna1.DEG$geneID<-as.character(rna1.DEG$geneID)
+
+rec1.novel<-rec1.DEG[-which(rec1.DEG$geneID%in%rna1.DEG$geneID),]
+```
+  For Record-seq, we also look for DE genes over days 2-7 in Record-seq using a looser confidence threshold (padj <0.1) to identify consistent diet-signature genes.
+
+```{r message=FALSE, warning=FALSE}
+rec1.DEG.list<-list()
+rec1.er<-list()
+rec1.de<-list()
+rec1.global.DEG<-c()
+for(i in unique(rec1d$Day)){
+  if(i<8){
+    dt<-rec1d[which(rec1d$Day==i), 1, drop=FALSE]
+    de<-rec1[,which(colnames(rec1)%in%rownames(dt))]
+    rec1.de[[i]]<-recoRdseq.DE(de,dt,tool='DESeq2')
+    rec1.er[[i]]<-recoRdseq.DE(de,dt,tool='edgeR')
+    rec1.de.genes<-recoRdseq.filterDEG(rec1.de[[i]], p = 0.1)
+    rec1.er.genes<-recoRdseq.filterDEG(rec1.er[[i]], p = 0.1)
+    rec1.DEG.list[[i]]<-rec1.de[[i]][intersect(rec1.de.genes, rec1.er.genes), c(1,7, which(grepl('log2FoldChange', colnames(rec1.de[[i]]))))]
+    rec1.global.DEG<- c(rec1.global.DEG, as.character(intersect(rec1.de.genes,rec1.er.genes)))
+  }
+}
+rec1.global.DEG1<-as.data.frame(table(rec1.global.DEG)[order(table(rec1.global.DEG), decreasing = TRUE)])
+rec1.global.DEG2<-as.data.frame(table(rec1.global.DEG)[order(table(rec1.global.DEG), decreasing = TRUE)])
+colnames(rec1.global.DEG1)<-c("geneID", "days_DE")
+colnames(rec1.global.DEG2)<-c("geneID", "days_DE")
+rec1.global.DEG1$geneID<-as.character(rec1.global.DEG1$geneID)
+rec1.global.DEG2$geneID<-as.character(rec1.global.DEG2$geneID)
+for(i in unique(rec1d$Day)){
+  if(i<8){
+  rec1.global.DEG1$V1<-rec1.de[[i]][rec1.global.DEG1$geneID,4]
+  colnames(rec1.global.DEG1)[ncol(rec1.global.DEG1)]<-paste0("log2FoldChange_FC_day", i)
+  rec1.global.DEG2$V1<-rec1.de[[i]][rec1.global.DEG2$geneID,8]
+  colnames(rec1.global.DEG2)[ncol(rec1.global.DEG2)]<-paste0("log2FoldChange_SC_day", i)
+
+  }
+}
+rec1.global.DEG1$log2FoldChange.max<-rec1.global.DEG1[,3:ncol(rec1.global.DEG1)][cbind(1:nrow(rec1.global.DEG1[,3:ncol(rec1.global.DEG1)]), max.col(replace(x <- abs(rec1.global.DEG1[,3:ncol(rec1.global.DEG1)]), is.na(x), -Inf)))]
+rec1.global.DEG2$log2FoldChange.max<-rec1.global.DEG2[,3:ncol(rec1.global.DEG2)][cbind(1:nrow(rec1.global.DEG2[,3:ncol(rec1.global.DEG2)]), max.col(replace(x <- abs(rec1.global.DEG2[,3:ncol(rec1.global.DEG2)]), is.na(x), -Inf)))]
+
+rec1.global.DEG<-rec1.global.DEG1[,c(1,2,ncol(rec1.global.DEG1))]
+rec1.global.DEG$V1<-rec1.global.DEG2[,ncol(rec1.global.DEG1)]
+colnames(rec1.global.DEG)[3]<-"log2FoldChange.max_FC"
+colnames(rec1.global.DEG)[4]<-"log2FoldChange.max_SC"
+
+```
+
+
+## Plotting individual DEGs:
+  We plot vst-transformed genome-mapping spacer counts for 6 genes in the gntR pathway for chow and starch fed mice on day 7.
+  
+```{r message=FALSE, warning=FALSE, fig.height=2.2, fig.width=3}
+gntR_genes<-c('eda','edd', 'gntT', 'kdgT', 'gntU', 'gntK')
+de<-rec1d_day7[rec1d_day7$Diet!='Fat',]
+dt<-rec1_day7tf[gntR_genes, rownames(de)]
+rec1.gntR.plot.df<-data.frame(Diet=de$Diet, t(dt))
+rec1.gntR.plot.df<-melt(rec1.gntR.plot.df, id.vars = 'Diet')
+rec1.gntR.plot<-ggplot(rec1.gntR.plot.df, aes(y=value, x=variable, fill=Diet, color='black'))+geom_boxplot(size=0.24, outlier.size=0)+geom_point(size=0.48, position = position_dodge(0.75))+theme_pub+ylab("gene-aligning spacer counts (vst-transformed)")+xlab("gene")+ggtitle("Record-seq counts on day 7 for gntR gene")+scale_fill_manual(values = as.vector(colour_code$Diet[c(1,3)]))+scale_color_manual(values = c("black"), guide='none')
+rec1.gntR.plot+plot_annotation()
+
+
+```
+## Heatmap for Record-seq and RNA-seq DEGs on day 7
+  We plot heatmaps showing hierarchical clustering of samples using detected DE genes for both Record-seq and RNA-seq on day 7. 
+
+```{r message=FALSE, warning=FALSE, fig.height=2.2, fig.width=3}
+cols<- colorRampPalette(c("dodgerblue4", "white","violetred4"))(256)
+ribosomal<-c(grep("rrs", rownames(rec1.DEG)), grep("rrl", rownames(rec1.DEG)))
+if(length(ribosomal)>0){
+  rec1.DEG<-rec1.DEG[-ribosomal,]
+}
+dheatmap<-as.data.frame(t(apply(rec1_day7tf[rec1.DEG$geneID,], 1, zscorestandardize)))
+heatmap.rec1.day7<-pheatmap(dheatmap, annotation_col = rec1d_day7[,1, drop=FALSE], annotation_colors=colour_code, fontsize = 5, fontsize_row = 5, fontsize_col = 5, cluster_rows = TRUE, treeheight_row = 0, clustering_distance_cols = "canberra", treeheight_col = 5,show_colnames = FALSE, show_rownames = FALSE, color = cols,fontsize_number=5, width=2.28, height=2.28, main='Record-seq DEGs day 7')
+ribosomal<-c(grep("rrs", rownames(rna1.DEG)), grep("rrl", rownames(rna1.DEG)))
+if(length(ribosomal)>0){
+  rna1.DEG<-rna1.DEG[-ribosomal,]
+}
+cols<- colorRampPalette(c("dodgerblue4", "white","violetred4"))(256)
+dheatmap<-as.data.frame(t(apply(rna1_tf[rna1.DEG$geneID,], 1, zscorestandardize)))
+heatmap.rna1.day7<-pheatmap(dheatmap, annotation_col = rna1d[,1, drop=FALSE], annotation_colors=colour_code, fontsize = 5, fontsize_row = 5, fontsize_col = 5, cluster_rows = TRUE, treeheight_row = 0, treeheight_col = 5, show_colnames = FALSE,show_rownames = FALSE, color = cols,fontsize_number=5, width=2.28, height=2.28, main='RNA-seq DEGs day 7')
+```
+
+## Volcano plots for Record-seq DEGs
+
+  We perform pairwise DE analysis using DESeq2 and edgeR to identify log2FC and p-adj values for each diet pair on day 7, and plot volcanoes (log2FC>1.5, padj<0.1)
+
+
+```{r message=FALSE, warning=FALSE, fig.height=2.2, fig.width=3}
+levels<-sort(unique(rec1d_day7[,1]))
+pairwise.combo<-combn(levels, 2)
+color.combo<-combn(colour_code$Diet, 2)
+rec1.de.vals<-list()
+rec1.ed.vals<-list()
+vol.plots<-list()
+DEG<-list()
+for(i in 1:dim(pairwise.combo)[2]){
+  ds<-rec1d_day7[which(rec1d_day7[,1]%in%pairwise.combo[,i]),]
+  ds$Diet<-as.character(ds$Diet)
+  dt<-rec1_day7[,rownames(ds)]
+  dtf<-recoRdseq.transform(dt,ds)
+  rec1.de.vals[[i]] <- recoRdseq.DE(dt, ds, tool = 'DESeq2')
+  rec1.ed.vals[[i]] <- recoRdseq.DE(dt, ds, tool = 'edgeR')
+  rownames(rec1.de.vals[[i]]) <- rec1.de.vals[[i]]$geneID
+  rownames(rec1.ed.vals[[i]]) <- rec1.ed.vals[[i]]$geneID
+  deseq.genes<-recoRdseq.filterDEG(rec1.de.vals[[i]], p = 0.1)
+  edger.genes<-recoRdseq.filterDEG(rec1.ed.vals[[i]], p = 0.1)
+  DEG[[i]]<-data.frame(row.names=intersect(deseq.genes, edger.genes),geneID=intersect(deseq.genes, edger.genes),log2Foldchange=rec1.de.vals[[i]][intersect(deseq.genes, edger.genes), 4], padj=rec1.de.vals[[i]][intersect(deseq.genes, edger.genes), 7])
+  ribosomal<-c(grep("rrs", rownames(DEG[[i]])), grep("rrl", rownames(DEG[[i]])))
+  if(length(ribosomal)>0){
+      DEG[[i]]<-DEG[[i]][-ribosomal,]
+  }
+  DEG[[i]]$geneID<-as.character(DEG[[i]]$geneID)
+  rec1.de.vals[[i]]<-rec1.de.vals[[i]][complete.cases(rec1.de.vals[[i]]),]
+  rec1.de.vals[[i]]$Group<-'None'
+  rec1.de.vals[[i]]$Group[ which(rec1.de.vals[[i]]$log2FoldChange>1.5&rec1.de.vals[[i]]$padj<0.1)]<-paste0("upregulated.in.", as.character(sort(unique(ds$Diet))[2]))
+  rec1.de.vals[[i]]$Group[ which(rec1.de.vals[[i]]$log2FoldChange<(-1.5)&rec1.de.vals[[i]]$padj<0.1)]<-paste0("upregulated.in.", sort(unique(ds$Diet))[1])
+ rec1.de.vals[[i]]$Group<-factor(rec1.de.vals[[i]]$Group, levels = c(paste0("upregulated.in.", as.character(sort(unique(ds$Diet))[1])), paste0("upregulated.in.", sort(unique(ds$Diet))[2]), 'None' ))
+  rec1.de.vals[[i]]$label<-FALSE
+  m1<-rec1.de.vals[[i]][rec1.de.vals[[i]]$log2FoldChange>1.5, 'geneID'][1:10]
+  m2<-rec1.de.vals[[i]][rec1.de.vals[[i]]$log2FoldChange<(-1.5), 'geneID'][1:10]
+  m<-which(rec1.de.vals[[i]]$geneID%in%union(m1,m2))
+  for(j in m){
+    if(abs(rec1.de.vals[[i]]$log2FoldChange[j])>1.5&rec1.de.vals[[i]]$padj[j]<0.1){
+      rec1.de.vals[[i]]$label[j]<-TRUE
+    }
+  }
+  vol.plots[[i]]<-ggplot(rec1.de.vals[[i]], aes( x=log2FoldChange, y=(-log10(padj)), color=Group))+scale_colour_manual(values = c(color.combo[,i], 'gray70'))+geom_point(size=0.24)+geom_text_repel(data = rec1.de.vals[[i]][which(rec1.de.vals[[i]]$label),], aes( x=log2FoldChange, y=(-log10(padj)), label=geneID), size=1.76, show.legend=FALSE)+theme_pub+geom_vline(xintercept = 1.5, size=0.24)+geom_vline(xintercept = -1.5, size=0.24)+geom_hline(yintercept = 1, size=0.24)+xlab("log2 fold change")+ylab("-log10 p-adjusted value")+guides(color = guide_legend(override.aes = list(size=1.5)))
+}
+
+vol.plots[[1]] + vol.plots[[2]] +vol.plots[[3]] + plot_annotation(tag_levels = 'A')+plot_layout(ncol = 2)
+
+```
+
+## Clustering on final day of experiment
+  We want to check whether information about diet groups prior to switch can be retrieved at day 14 - i.e 7 days after the switch. For this, we use diet-signature genes identified before the switch to hierarchically cluster the groups. Diet-signature genes are defined here as the top 10 genes by number of days (Record-seq) or p-adj value (RNA-seq) detected as enriched (log2FC > 2.5) prior to the switch. We can perfectly classify groups using Record-seq data, while for RNA-seq, the groups converge. 
+
+```{r message=FALSE, warning=FALSE, fig.height=2.2, fig.width=3}
+ribosomal<-c(grep("rrs", rec1.global.DEG$geneID), grep("rrl", rec1.global.DEG$geneID))
+if(length(ribosomal)>0){
+  rec1.global.DEG<-rec1.global.DEG[-ribosomal,]
+}
+geneShortList<-unique(c(rec1.global.DEG[which(rec1.global.DEG$log2FoldChange.max_FC>2.5), 1][1:10], rec1.global.DEG[which(rec1.global.DEG$log2FoldChange.max_SC>2.5), 1][1:10],rec1.global.DEG[which(rowMeans(rec1.global.DEG[,3:4])<(-2.5)), 1][1:10]))
+cols<- colorRampPalette(c("dodgerblue4", "white","violetred4"))(256)
+dheatmap<-as.data.frame(t(apply(rec1_day14tf[geneShortList,], 1, zscorestandardize)))
+heatmap.rec1<-pheatmap(dheatmap, annotation_col = rec1d_day14[,1, drop=FALSE], annotation_colors=colour_code, treeheight_row=0, treeheight_col=5, fontsize = 5, fontsize_row = 5, fontsize_col = 5, cluster_rows = FALSE, show_colnames = FALSE, color = cols,fontsize_number=5, main='Hierarchical clustering of Record-seq data on day 14 based on DEGS detected on day 7')
+heatmap.genelist<-rec1_day14tf[geneShortList,]
+colnames(heatmap.genelist)<-rec1d_day14$Diet
+
+
+cols<- colorRampPalette(c("dodgerblue4", "white","violetred4"))(256)
+geneShortList<-unique(c(rna1.DEG[which(rna1.DEG$log2FoldChange.Fat_vs_Chow>2.5), 1][1:12], rna1.DEG[which(rna1.DEG$log2FoldChange.Starch_vs_Chow>2.5), 1][1:12],rna1.DEG[which(rowMeans(rna1.DEG[,3:4])<(-2.5)), 1][1:12]))
+dheatmap<-as.data.frame(t(apply(rna1_day14tf[geneShortList,], 1, zscorestandardize)))
+dheatmap<-dheatmap[complete.cases(dheatmap),]
+heatmap.rna1<-pheatmap(dheatmap, annotation_col = rna1d_day14[,1, drop=FALSE], annotation_colors=colour_code, treeheight_row=0,  treeheight_col=5, fontsize = 5, fontsize_row = 5, fontsize_col = 5, cluster_rows = FALSE, show_colnames = FALSE, color = cols,fontsize_number=5, main='Hierarchical clustering of RNA-seq data on day 14 based on DEGS detected on day 7')
+
+```
+
+# Transient Diet 2
+
+  We now analyze data for the extended transient diet experiment with 20 days.
+
+## Importing and pre-processing data for transient diet 2
+  We import the data matrices, filter them for lowly expressed genes as well as outlier samples with low cumulative counts, and use vst from DESeq2 to normalize and transform the data. We also exclude day1 from the analysis since we have emperically observed that the data are noisy for the first day of colonization.
+```{r message=FALSE, warning=FALSE, fig.height=2.2, fig.width=3}
+rec2<-as.data.frame(read.table("data/transientDiet2_Recordseq_genomealigning.txt", header = TRUE))
+rec2d<-as.data.frame(read.table("data/transientDiet2_Recordseq_designmatrix.txt", header = TRUE))
+DEList<-recoRdseq.preprocess(rec2, rec2d, minCountsPerSample = 10000)
+rec2<-DEList[[1]]
+rec2d<-DEList[[2]]
+rec2d<-rec2d[rec2d$Day>1,]
+rec2<-rec2[,rownames(rec2d)]
+rec2_tf<-recoRdseq.transform(rec2, rec2d)
+rna2<-as.data.frame(read.table("data/transientDiet2_RNAseq_genomealigning.txt", header = TRUE))
+rna2d<-as.data.frame(read.table("data/transientDiet2_RNAseq_designmatrix.txt", header = TRUE))
+rna2d<-rna2d[,1:3]
+DEList<-recoRdseq.preprocess(rna2, rna2d, minCountsPerSample = 100000)
+rna2<-DEList[[1]]
+rna2d<-DEList[[2]]
+rna2_tf<-recoRdseq.transform(rna2, rna2d)
+rnadays<-unique(rna2d$Day)
+```
+
+## Data exploration
+  We use Principal Component analysis and UMAP for dimensionality reduction and exploring clusters in an unsupervised fashion in our data.  We first generate these for the entire dataset from Record-seq:
+
+```{r message=FALSE, warning=FALSE, fig.height=2.2, fig.width=3}
+rec2sds <- rowSds(as.matrix(rec2_tf))
+o <- order(rec2sds, decreasing = TRUE)
+rec2PCA<-prcomp(t(rec2_tf[o[1:500],]))
+pca_stat<-summary(rec2PCA)
+rec2.pca_variance<-pca_stat$importance[2,]
+rec2PCA<-as.data.frame(rec2PCA$x)
+rec2PCA$Diet<-rec2d$Diet
+rec2PCA$Day<-factor(rec2d$Day, levels = 1:20)
+rec2PCAplot<-ggplot(rec2PCA, aes(x=PC1, y=PC2, fill=Diet,  size=Day))+geom_point(pch=21, colour='#000000', stroke=0.25)+theme_pub+scale_size_discrete(range=c(1,2.5))+geom_hline(yintercept = 0, size=0.24)+scale_fill_manual(values = as.vector(colour_code$Diet))+geom_vline(xintercept = 0, size=0.24)+ guides(fill = guide_legend(override.aes = list(size=2)))+ylab(paste0("PC2 (", as.character(rec2.pca_variance[2]*100), "% variance explained)"))+xlab(paste0("PC1 (", as.character(rec2.pca_variance[1]*100), "% variance explained)"))+ggtitle(" PCA plot of Record-seq data")
+
+rec2UMAP<-umap(rec2PCA[,1:(ncol(rec2PCA)-2)], custom.config)
+rec2UMAP<-as.data.frame(rec2UMAP$layout)
+rec2UMAP$Day<-factor(rec2d$Day, levels = 1:20)
+rec2UMAP$Diet<-rec2d$Diet
+colnames(rec2UMAP)[1:2]<-c('UMAP1','UMAP2')
+rec2UMAPplot<-ggplot(rec2UMAP, aes(x=UMAP1, y=UMAP2, fill=Diet,  size=Day))+geom_point(pch=21, colour='#000000', stroke=0.25)+theme_pub+scale_size_discrete(range=c(1,2.5))+geom_hline(yintercept = 0, size=0.24)+geom_vline(xintercept = 0, size=0.24)+ guides(fill = guide_legend(override.aes = list(size=2)))+scale_fill_manual(values = as.vector(colour_code$Diet))+ggtitle("UMAP plot for Record-seq data (all days)")
+
+rec2PCAplot+rec2UMAPplot+plot_annotation(tag_levels = 'A')
+
+```
+
+
+  For a comparasion between Record-seq and RNA-seq, we exclude the days in Record-seq that don't have corresponding RNA-seq data. We first check if the diet groups can be classified using PCA on day 7 (the last day when the mice are fed different diets, before switching all mice to a 'Chow' diet)
+
+```{r message=FALSE, warning=FALSE, fig.height=2.2, fig.width=3}
+
+rec2d_day7<-rec2d[rec2d$Day==7,]
+rec2_day7<-rec2[, rownames(rec2d_day7)]
+rec2_day7tf<-recoRdseq.transform(rec2_day7, rec2d_day7)
+rec2_day7_sds <- rowSds(as.matrix(rec2_day7tf))
+o <- order(rec2_day7_sds, decreasing = TRUE)
+rec2_day7PCA<-prcomp(t(rec2_day7tf[o[1:500],]))
+pca_stat<-summary(rec2_day7PCA)
+pca_variance<-pca_stat$importance[2,]
+rec2_day7PCA<-as.data.frame(rec2_day7PCA$x)
+rec2_day7PCA$Diet<-rec2d_day7$Diet
+rec2_day7PCA$Day<-factor(rec2d_day7$Day, levels = c(7))
+rec2_day7PCAplot<-ggplot(rec2_day7PCA, aes(x=PC1, y=PC2, fill=Diet,  size=Day))+geom_point(pch=21, colour='#000000', stroke=0.25)+theme_pub+scale_size_discrete(range=c(2,2.5))+geom_hline(yintercept = 0, size=0.24)+scale_fill_manual(values = as.vector(colour_code$Diet))+geom_vline(xintercept = 0, size=0.24)+ guides(fill = guide_legend(override.aes = list(size=2)))+ylab(paste0("PC2 (", as.character(pca_variance[2]*100), "% variance explained)"))+xlab(paste0("PC1 (", as.character(pca_variance[1]*100), "% variance explained)"))+ggtitle(" PCA plot of Record-seq data on day 7 ")
+
+rna2d_day7<-rna2d[rna2d$Day==7,]
+rna2_day7<-rna2[, rownames(rna2d_day7)]
+rna2_day7tf<-recoRdseq.transform(rna2_day7, rna2d_day7)
+rna2_day7_sds <- rowSds(as.matrix(rna2_day7tf))
+o <- order(rna2_day7_sds, decreasing = TRUE)
+rna2_day7PCA<-prcomp(t(rna2_day7tf[o[1:500],]))
+pca_stat<-summary(rna2_day7PCA)
+pca_variance<-pca_stat$importance[2,]
+rna2_day7PCA<-as.data.frame(rna2_day7PCA$x)
+rna2_day7PCA$Diet<-rna2d_day7$Diet
+rna2_day7PCA$Day<-factor(rna2d_day7$Day, levels = c(7))
+rna2_day7PCAplot<-ggplot(rna2_day7PCA, aes(x=PC1, y=PC2, fill=Diet,  size=Day))+geom_point(pch=21, colour='#000000', stroke=0.25)+theme_pub+scale_size_discrete(range=c(2,2.5))+geom_hline(yintercept = 0, size=0.24)+scale_fill_manual(values = as.vector(colour_code$Diet))+geom_vline(xintercept = 0, size=0.24)+ guides(fill = guide_legend(override.aes = list(size=2)))+ylab(paste0("PC2 (", as.character(pca_variance[2]*100), "% variance explained)"))+xlab(paste0("PC1 (", as.character(pca_variance[1]*100), "% variance explained)"))+ggtitle(" PCA plot of RNA-seq data on day 7 ")
+
+
+rec2_day7PCAplot+rna2_day7PCAplot+plot_annotation(tag_levels = 'A')
+
+```
+
+  We then compare the temporal trajectories of Record-seq and RNA-seq using UMAPs. Record-seq data retains information about prior diet groups till the final day, and clusters strongly based on group; whereas RNA-seq data has a pronounced temporal change, and initial clusters for different diet groups quickly converge.
+
+```{r message=FALSE, warning=FALSE, fig.height=2.2, fig.width=3}
+rec2d_rna<-rec2d[which(rec2d$Day%in%rnadays),]
+rec2_rna<-rec2[, rownames(rec2d_rna)]
+rec2_rnatf<-recoRdseq.transform(rec2_rna, rec2d_rna)
+rec2rnasds <- rowSds(as.matrix(rec2_rnatf))
+o <- order(rec2rnasds, decreasing = TRUE)
+rec2rnaPCA<-prcomp(t(rec2_rnatf[o[1:500],]))
+pca_stat<-summary(rec2rnaPCA)
+rec2rna.pca_variance<-pca_stat$importance[2,]
+rec2rnaPCA<-as.data.frame(rec2rnaPCA$x)
+rec2rnaPCA$Diet<-rec2d_rna$Diet
+rec2rnaPCA$Day<-factor(rec2d_rna$Day, levels = rnadays)
+rec2rnaUMAP<-umap(rec2rnaPCA[,1:(ncol(rec2rnaPCA)-2)], custom.config)
+rec2rnaUMAP<-as.data.frame(rec2rnaUMAP$layout)
+rec2rnaUMAP$Day<-factor(rec2d_rna$Day, levels = rnadays)
+rec2rnaUMAP$Diet<-rec2d_rna$Diet
+colnames(rec2rnaUMAP)[1:2]<-c('UMAP1','UMAP2')
+rec2rnaUMAPplot<-ggplot(rec2rnaUMAP, aes(x=UMAP1, y=UMAP2, fill=Diet,  size=Day))+geom_point(pch=21, colour='#000000', stroke=0.25)+theme_pub+scale_size_discrete(range=c(1,2.5))+geom_hline(yintercept = 0, size=0.24)+geom_vline(xintercept = 0, size=0.24)+ guides(fill = guide_legend(override.aes = list(size=2)))+scale_fill_manual(values = as.vector(colour_code$Diet))+ggtitle("UMAP plot for Record-seq data")
+
+rna2sds <- rowSds(as.matrix(rna2_tf))
+o <- order(rna2sds, decreasing = TRUE)
+rna2PCA<-prcomp(t(rna2_tf[o[1:500],]))
+pca_stat<-summary(rna2PCA)
+rna2.pca_variance<-pca_stat$importance[2,]
+rna2PCA<-as.data.frame(rna2PCA$x)
+rna2PCA$Diet<-rna2d$Diet
+rna2PCA$Day<-factor(rna2d$Day, levels = rnadays)
+rna2UMAP<-umap(rna2PCA[,1:(ncol(rna2PCA)-2)], custom.config)
+rna2UMAP<-as.data.frame(rna2UMAP$layout)
+rna2UMAP$Day<-factor(rna2d$Day, levels = rnadays)
+rna2UMAP$Diet<-rna2d$Diet
+colnames(rna2UMAP)[1:2]<-c('UMAP1','UMAP2')
+rna2UMAPplot<-ggplot(rna2UMAP, aes(x=UMAP1, y=UMAP2, fill=Diet,  size=Day))+geom_point(pch=21, colour='#000000', stroke=0.25)+theme_pub+scale_size_discrete(range=c(1,2.5))+geom_hline(yintercept = 0, size=0.24)+geom_vline(xintercept = 0, size=0.24)+ guides(fill = guide_legend(override.aes = list(size=2)))+scale_fill_manual(values = as.vector(colour_code$Diet))+ggtitle("UMAP plot for RNA-seq data")
+rec2rnaUMAPplot+rna2UMAPplot+plot_annotation(tag_levels = 'A')
+
+```
+
+
+## Discovery of differentially expressed genes (DEGs):
+  We identify DEGs for day 7 (since this is the final day when the mice are fed separate diets, and RNA-seq is also available for this day). We define DEGs as genes identified to be significantly differentially expressed using a threshold (padj < 0.05) by both DESeq2 and edgeR (multiple testing, since we have 3 groups).  
+
+```{r message=FALSE, warning=FALSE}
+rec2.deseq<-recoRdseq.DE(rec2_day7, rec2d_day7, tool='DESeq2')
+rec2.edger<-recoRdseq.DE(rec2_day7, rec2d_day7, tool='edgeR')
+rec2.deseq.genes<-recoRdseq.filterDEG(rec2.deseq, p = 0.05)
+rec2.edger.genes<-recoRdseq.filterDEG(rec2.edger, p = 0.05)
+rec2.DEG<-rec2.deseq[intersect(rec2.deseq.genes, rec2.edger.genes), c(1,7, which(grepl('log2FoldChange', colnames(rec2.deseq))))]
+rec2.DEG$geneID<-as.character(rec2.DEG$geneID)
+rec2.DEG<-rec2.DEG[order(rec2.DEG$padj),]
+ribosomal<-c(grep("rrs", rownames(rec2.DEG)), grep("rrl", rownames(rec2.DEG)))
+if(length(ribosomal)>0){
+  rec2.DEG<-rec2.DEG[-ribosomal,]
+}
+rna2.deseq<-recoRdseq.DE(rna2_day7, rna2d_day7, tool='DESeq2')
+rna2.edger<-recoRdseq.DE(rna2_day7, rna2d_day7, tool='edgeR')
+rna2.deseq.genes<-recoRdseq.filterDEG(rna2.deseq, p = 0.05)
+rna2.edger.genes<-recoRdseq.filterDEG(rna2.edger, p = 0.05)
+rna2.DEG<-rna2.deseq[intersect(rna2.deseq.genes, rna2.edger.genes), c(1,7, which(grepl('log2FoldChange', colnames(rna2.deseq))))]
+rna2.DEG$geneID<-as.character(rna2.DEG$geneID)
+rna2.DEG<-rna2.DEG[order(rna2.DEG$padj),]
+ribosomal<-c(grep("rrs", rownames(rna2.DEG)), grep("rrl", rownames(rna2.DEG)))
+if(length(ribosomal)>0){
+  rna2.DEG<-rna2.DEG[-ribosomal,]
+}
+rec2.novel<-rec2.DEG[-which(rec2.DEG$geneID%in%rna2.DEG$geneID),]
+```
+  
+  We also look for DE genes over days 2-7 in Record-seq using a looser confidence threshold (padj <0.1) to identify consistent diet-signature genes.
+    
+```{r message=FALSE, warning=FALSE}
+rec2.DEG.list<-list()
+rec2.er<-list()
+rec2.de<-list()
+rec2.global.DEG<-c()
+for(i in unique(rec2d$Day)){
+  if(i<8){
+    dt<-rec2d[which(rec2d$Day==i), 1, drop=FALSE]
+    dt$Diet<-factor(dt$Diet)
+    de<-rec2[,which(colnames(rec2)%in%rownames(dt))]
+    rec2.de[[i]]<-recoRdseq.DE(de,dt,tool='DESeq2')
+    rec2.er[[i]]<-recoRdseq.DE(de,dt,tool='edgeR')
+    rec2.de.genes<-recoRdseq.filterDEG(rec2.de[[i]], p = 0.1)
+    rec2.er.genes<-recoRdseq.filterDEG(rec2.er[[i]], p = 0.1)
+    rec2.DEG.list[[i]]<-rec2.de[[i]][intersect(rec2.de.genes, rec2.er.genes), c(1,7, which(grepl('log2FoldChange', colnames(rec2.de[[i]]))))]
+    rec2.global.DEG<- c(rec2.global.DEG, as.character(intersect(rec2.de.genes,rec2.er.genes)))
+  }
+}
+rec2.global.DEG1<-as.data.frame(table(rec2.global.DEG)[order(table(rec2.global.DEG), decreasing = TRUE)])
+rec2.global.DEG2<-as.data.frame(table(rec2.global.DEG)[order(table(rec2.global.DEG), decreasing = TRUE)])
+colnames(rec2.global.DEG1)<-c("geneID", "days_DE")
+colnames(rec2.global.DEG2)<-c("geneID", "days_DE")
+rec2.global.DEG1$geneID<-as.character(rec2.global.DEG1$geneID)
+rec2.global.DEG2$geneID<-as.character(rec2.global.DEG2$geneID)
+for(i in unique(rec2d$Day)){
+  if(i<8){
+  rec2.global.DEG1$V1<-rec2.de[[i]][rec2.global.DEG1$geneID,4]
+  colnames(rec2.global.DEG1)[ncol(rec2.global.DEG1)]<-paste0("log2FoldChange_FC_day", i)
+  rec2.global.DEG2$V1<-rec2.de[[i]][rec2.global.DEG2$geneID,8]
+  colnames(rec2.global.DEG2)[ncol(rec2.global.DEG2)]<-paste0("log2FoldChange_SC_day", i)
+
+  }
+}
+rec2.global.DEG1$log2FoldChange.max<-rec2.global.DEG1[,3:ncol(rec2.global.DEG1)][cbind(1:nrow(rec2.global.DEG1[,3:ncol(rec2.global.DEG1)]), max.col(replace(x <- abs(rec2.global.DEG1[,3:ncol(rec2.global.DEG1)]), is.na(x), -Inf)))]
+rec2.global.DEG2$log2FoldChange.max<-rec2.global.DEG2[,3:ncol(rec2.global.DEG2)][cbind(1:nrow(rec2.global.DEG2[,3:ncol(rec2.global.DEG2)]), max.col(replace(x <- abs(rec2.global.DEG2[,3:ncol(rec2.global.DEG2)]), is.na(x), -Inf)))]
+
+rec2.global.DEG<-rec2.global.DEG1[,c(1,2,ncol(rec2.global.DEG1))]
+rec2.global.DEG$V1<-rec2.global.DEG2[,ncol(rec2.global.DEG2)]
+colnames(rec2.global.DEG)[3]<-"log2FoldChange.max_FC"
+colnames(rec2.global.DEG)[4]<-"log2FoldChange.max_SC"
+
+```
+ 
+ 
+## Plotting individual DEGs:
+  We plot vst-transformed genome-mapping spacer counts for 5 genes in the gntR pathway for chow and starch fed mice on day 7.
+  
+```{r message=FALSE, warning=FALSE, fig.height=2.2, fig.width=3}
+gntR_genes<-c('eda','edd', 'gntT', 'kdgT', 'gntU', 'gntK')
+de<-rec2d_day7[rec2d_day7$Diet!='Fat',]
+dt<-rec2_day7tf[gntR_genes, rownames(de)]
+rec2.gntR.plot.df<-data.frame(Diet=de$Diet, t(dt))
+rec2.gntR.plot.df<-melt(rec2.gntR.plot.df, id.vars = 'Diet')
+rec2.gntR.plot<-ggplot(rec2.gntR.plot.df, aes(y=value, x=variable, fill=Diet, color='black'))+geom_boxplot(size=0.24, outlier.size=0)+geom_point(size=0.48, position = position_dodge(0.75))+theme_pub+ylab("gene-mapping spacer counts (vst-transformed)")+xlab("gene")+ggtitle("Record-seq counts on day 7 for gntR gene")+scale_fill_manual(values = as.vector(colour_code$Diet[c(1,3)]))+scale_color_manual(values = c("black"), guide='none')
+rec2.gntR.plot+plot_annotation()
+
+```
+
+## Heatmap for Record-seq and RNA-seq DEGs on day 7
+  We plot heatmaps showing hierarchical clustering of samples using detected DE genes for both Record-seq and RNA-seq on day 7. 
+  
+```{r message=FALSE, warning=FALSE, fig.height=2.2, fig.width=3}
+cols<- colorRampPalette(c("dodgerblue4", "white","violetred4"))(256)
+dheatmap<-as.data.frame(t(apply(rec2_day7tf[rec2.DEG$geneID,], 1, zscorestandardize)))
+heatmap.rec2.day7<-pheatmap(dheatmap, annotation_col = rec2d_day7[,1, drop=FALSE], annotation_colors=colour_code, fontsize = 5, fontsize_row = 5, fontsize_col = 5, cluster_rows = TRUE, treeheight_row = 0,  treeheight_col = 5, show_colnames = FALSE, show_rownames = FALSE, color = cols,fontsize_number=5, width=2.28, height=2.28, main='Record-seq DEGs day 7')
+heatmap.genelist<-heatmap.rec2.day7$tree_row$labels[heatmap.rec2.day7$tree_row$order]
+heatmap.genelist<-rec2_day7tf[heatmap.genelist,]
+colnames(heatmap.genelist)<-as.character(rec2d_day7$Diet)
+
+cols<- colorRampPalette(c("dodgerblue4", "white","violetred4"))(256)
+dheatmap<-as.data.frame(t(apply(rna2_day7tf[rna2.DEG$geneID,], 1, zscorestandardize)))
+heatmap.rna2.day7<-pheatmap(dheatmap, annotation_col = rna2d_day7[,1, drop=FALSE], annotation_colors=colour_code, fontsize = 5, fontsize_row = 5, fontsize_col = 5, cluster_rows = TRUE, treeheight_row = 0, treeheight_col = 5, show_colnames = FALSE,show_rownames = FALSE, color = cols,fontsize_number=5, width=2.28, height=2.28, main='RNA-seq DEGs day 7')
+```
+  
+## Volcano plots and heatmaps for Record-seq and RNA-seq DEGs:
+We perform pairwise DE analysis using DESeq2 to identify log2FC and p-adj values for each diet pair on day 7, and plot volcanoes (log2FC>1.5, padj<0.1)
+   
+  Record-seq: 
+```{r message=FALSE, warning=FALSE, fig.height=2.2, fig.width=3}
+levels<-sort(unique(rec2d_day7[,1]))
+pairwise.combo<-combn(levels, 2)
+color.combo<-combn(colour_code$Diet, 2)
+rec2.de.vals<-list()
+rec2.ed.vals<-list()
+vol.plots<-list()
+DEG<-list()
+for(i in 1:dim(pairwise.combo)[2]){
+  ds<-rec2d_day7[which(rec2d_day7[,1]%in%pairwise.combo[,i]),]
+  ds$Diet<-as.character(ds$Diet)
+  dt<-rec2_day7[,rownames(ds)]
+  dtf<-recoRdseq.transform(dt,ds)
+  rec2.de.vals[[i]] <- recoRdseq.DE(dt, ds, tool = 'DESeq2')
+  rec2.ed.vals[[i]] <- recoRdseq.DE(dt, ds, tool = 'edgeR')
+  rownames(rec2.de.vals[[i]]) <- rec2.de.vals[[i]]$geneID
+  rownames(rec2.ed.vals[[i]]) <- rec2.ed.vals[[i]]$geneID
+  deseq.genes<-recoRdseq.filterDEG(rec2.de.vals[[i]], p = 0.1)
+  edger.genes<-recoRdseq.filterDEG(rec2.ed.vals[[i]], p = 0.1)
+  DEG[[i]]<-data.frame(row.names=intersect(deseq.genes, edger.genes),geneID=intersect(deseq.genes, edger.genes),log2Foldchange=rec2.de.vals[[i]][intersect(deseq.genes, edger.genes), 4], padj=rec2.de.vals[[i]][intersect(deseq.genes, edger.genes), 7])
+  ribosomal<-c(grep("rrs", rownames(DEG[[i]])), grep("rrl", rownames(DEG[[i]])))
+  if(length(ribosomal)>0){
+      DEG[[i]]<-DEG[[i]][-ribosomal,]
+  }
+  DEG[[i]]$geneID<-as.character(DEG[[i]]$geneID)
+  rec2.de.vals[[i]]<-rec2.de.vals[[i]][complete.cases(rec2.de.vals[[i]]),]
+  rec2.de.vals[[i]]$Group<-'None'
+  rec2.de.vals[[i]]$Group[ which(rec2.de.vals[[i]]$log2FoldChange>1.5&rec2.de.vals[[i]]$padj<0.1)]<-paste0("upregulated.in.", as.character(sort(unique(ds$Diet))[2]))
+  rec2.de.vals[[i]]$Group[ which(rec2.de.vals[[i]]$log2FoldChange<(-1.5)&rec2.de.vals[[i]]$padj<0.1)]<-paste0("upregulated.in.", sort(unique(ds$Diet))[1])
+ rec2.de.vals[[i]]$Group<-factor(rec2.de.vals[[i]]$Group, levels = c(paste0("upregulated.in.", as.character(sort(unique(ds$Diet))[1])), paste0("upregulated.in.", sort(unique(ds$Diet))[2]), 'None' ))
+  rec2.de.vals[[i]]$label<-FALSE
+  m1<-rec2.de.vals[[i]][rec2.de.vals[[i]]$log2FoldChange>1.5, 'geneID'][1:10]
+  m2<-rec2.de.vals[[i]][rec2.de.vals[[i]]$log2FoldChange<(-1.5), 'geneID'][1:10]
+  m<-which(rec2.de.vals[[i]]$geneID%in%union(m1,m2))
+  for(j in m){
+    if(abs(rec2.de.vals[[i]]$log2FoldChange[j])>1.5&rec2.de.vals[[i]]$padj[j]<0.1){
+      rec2.de.vals[[i]]$label[j]<-TRUE
+    }
+  }
+  vol.plots[[i]]<-ggplot(rec2.de.vals[[i]], aes( x=log2FoldChange, y=(-log10(padj)), color=Group))+scale_colour_manual(values = c(color.combo[,i], 'gray70'))+geom_point(size=0.24)+geom_text_repel(data = rec2.de.vals[[i]][which(rec2.de.vals[[i]]$label),], aes( x=log2FoldChange, y=(-log10(padj)), label=geneID), size=1.76, show.legend=FALSE)+theme_pub+geom_vline(xintercept = 1.5, size=0.24)+geom_vline(xintercept = -1.5, size=0.24)+geom_hline(yintercept = 1, size=0.24)+xlab("log2 fold change")+ylab("-log10 p-adjusted value")+guides(color = guide_legend(override.aes = list(size=1.5)))
+}
+
+vol.plots[[1]] + vol.plots[[2]] +vol.plots[[3]] + plot_annotation(tag_levels = 'A')+plot_layout(ncol = 2)
+
+```
+  
+  RNA-seq:
+```{r message=FALSE, warning=FALSE, fig.height=2.2, fig.width=3}
+levels<-sort(unique(rna2d_day7[,1]))
+pairwise.combo<-combn(levels, 2)
+color.combo<-combn(colour_code$Diet, 2)
+rna2.de.vals<-list()
+rna2.ed.vals<-list()
+vol.plots<-list()
+DEG<-list()
+for(i in 1:dim(pairwise.combo)[2]){
+  ds<-rna2d_day7[which(rna2d_day7[,1]%in%pairwise.combo[,i]),]
+  ds$Diet<-as.character(ds$Diet)
+  dt<-rna2_day7[,rownames(ds)]
+  dtf<-recoRdseq.transform(dt,ds)
+  rna2.de.vals[[i]] <- recoRdseq.DE(dt, ds, tool = 'DESeq2')
+  rna2.ed.vals[[i]] <- recoRdseq.DE(dt, ds, tool = 'edgeR')
+  rownames(rna2.de.vals[[i]]) <- rna2.de.vals[[i]]$geneID
+  rownames(rna2.ed.vals[[i]]) <- rna2.ed.vals[[i]]$geneID
+  deseq.genes<-recoRdseq.filterDEG(rna2.de.vals[[i]], p = 0.1)
+  edger.genes<-recoRdseq.filterDEG(rna2.ed.vals[[i]], p = 0.1)
+  DEG[[i]]<-data.frame(row.names=intersect(deseq.genes, edger.genes),geneID=intersect(deseq.genes, edger.genes),log2Foldchange=rna2.de.vals[[i]][intersect(deseq.genes, edger.genes), 4], padj=rna2.de.vals[[i]][intersect(deseq.genes, edger.genes), 7])
+  ribosomal<-c(grep("rrs", rownames(DEG[[i]])), grep("rrl", rownames(DEG[[i]])))
+  if(length(ribosomal)>0){
+      DEG[[i]]<-DEG[[i]][-ribosomal,]
+  }
+  DEG[[i]]$geneID<-as.character(DEG[[i]]$geneID)
+  rna2.de.vals[[i]]<-rna2.de.vals[[i]][complete.cases(rna2.de.vals[[i]]),]
+  rna2.de.vals[[i]]$Group<-'None'
+  rna2.de.vals[[i]]$Group[ which(rna2.de.vals[[i]]$log2FoldChange>1.5&rna2.de.vals[[i]]$padj<0.1)]<-paste0("upregulated.in.", as.character(sort(unique(ds$Diet))[2]))
+  rna2.de.vals[[i]]$Group[ which(rna2.de.vals[[i]]$log2FoldChange<(-1.5)&rna2.de.vals[[i]]$padj<0.1)]<-paste0("upregulated.in.", sort(unique(ds$Diet))[1])
+ rna2.de.vals[[i]]$Group<-factor(rna2.de.vals[[i]]$Group, levels = c(paste0("upregulated.in.", as.character(sort(unique(ds$Diet))[1])), paste0("upregulated.in.", sort(unique(ds$Diet))[2]), 'None' ))
+  rna2.de.vals[[i]]$label<-FALSE
+  m1<-rna2.de.vals[[i]][rna2.de.vals[[i]]$log2FoldChange>1.5, 'geneID'][1:10]
+  m2<-rna2.de.vals[[i]][rna2.de.vals[[i]]$log2FoldChange<(-1.5), 'geneID'][1:10]
+  m<-which(rna2.de.vals[[i]]$geneID%in%union(m1,m2))
+  for(j in m){
+    if(abs(rna2.de.vals[[i]]$log2FoldChange[j])>1.5&rna2.de.vals[[i]]$padj[j]<0.1){
+      rna2.de.vals[[i]]$label[j]<-TRUE
+    }
+  }
+  vol.plots[[i]]<-ggplot(rna2.de.vals[[i]], aes( x=log2FoldChange, y=(-log10(padj)), color=Group))+scale_colour_manual(values = c(color.combo[,i], 'gray70'))+geom_point(size=0.24)+geom_text_repel(data = rna2.de.vals[[i]][which(rna2.de.vals[[i]]$label),], aes( x=log2FoldChange, y=(-log10(padj)), label=geneID), size=1.76, show.legend=FALSE)+theme_pub+geom_vline(xintercept = 1.5, size=0.24)+geom_vline(xintercept = -1.5, size=0.24)+geom_hline(yintercept = 1, size=0.24)+xlab("log2 fold change")+ylab("-log10 p-adjusted value")+guides(color = guide_legend(override.aes = list(size=1.5)))
+}
+
+vol.plots[[1]] + vol.plots[[2]] +vol.plots[[3]] + plot_annotation(tag_levels = 'A')+plot_layout(ncol = 2)
+
+
+
+```
+
+
+## Hierarchical clustering on final day using DEGs
+
+  We want to check whether information about diet groups prior to switch can be retrieved at day 20 - i.e 13 days after the switch. For this, we use diet signature genes identified before the switch (DEGs) to hierarchically cluster the groups. We can almost perfectly classify groups using Record-seq data, while for RNA-seq, the groups converge. 
+
+```{r message=FALSE, warning=FALSE, fig.height=2.2, fig.width=3}
+rec2d_day20<-rec2d[rec2d$Day==20,]
+rec2_day20<-rec2[,rownames(rec2d_day20)]
+rec2_day20_tf<-recoRdseq.transform(rec2_day20, rec2d_day20)
+
+cols<- colorRampPalette(c("dodgerblue4", "white","violetred4"))(256)
+ribosomal<-c(grep("rrs", rec2.global.DEG$geneID), grep("rrl", rec2.global.DEG$geneID))
+if(length(ribosomal)>0){
+  rec2.global.DEG<-rec2.global.DEG[-ribosomal,]
+}
+rec2.geneShortList<-unique(c(rec2.global.DEG[which(rec2.global.DEG$log2FoldChange.max_FC>2.5), 1][1:10], rec2.global.DEG[which(rec2.global.DEG$log2FoldChange.max_SC>2.5), 1][1:10],rec2.global.DEG[which(rec2.global.DEG$log2FoldChange.max_SC<(-2.5)&rec2.global.DEG$log2FoldChange.max_FC<(-2.5)), 1][1:10]))
+dheatmap<-as.data.frame(t(apply(rec2_day20_tf[rec2.geneShortList,], 1, zscorestandardize)))
+heatmap.rec2<-pheatmap(dheatmap, annotation_col = rec2d_day20[,1, drop=FALSE], annotation_colors=colour_code, treeheight_row=0, fontsize = 5, fontsize_row = 5, fontsize_col = 5, cluster_rows = FALSE, show_colnames = FALSE,color = cols,fontsize_number=5, main='Hierarchical clustering of Record-seq data on day 20 based on diet signature genes')
+heatmap.genelist<-rec2_day20_tf[rec2.geneShortList,]
+colnames(heatmap.genelist)<-as.character(rec2d_day20$Diet)
+
+rna2d_day20<-rna2d[rna2d$Day==20,]
+rna2_day20<-rna2[,rownames(rna2d_day20)]
+rna2_day20_tf<-recoRdseq.transform(rna2_day20, rna2d_day20)
+rna2.geneShortList<-unique(c(rna2.DEG[rna2.DEG$log2FoldChange.Fat_vs_Chow>2.5, 1][1:10], rna2.DEG[rna2.DEG$log2FoldChange.Starch_vs_Chow>2.5, 1][1:10], rna2.DEG[which(rowMeans(rna2.DEG[,3:4])<(-2.5)), 1][1:10]))
+cols<- colorRampPalette(c("dodgerblue4", "white","violetred4"))(256)
+dheatmap<-as.data.frame(t(apply(rna2_day20_tf[rna2.geneShortList,], 1, zscorestandardize)))
+heatmap.rna2<-pheatmap(dheatmap, annotation_col = rna2d_day20[,1, drop=FALSE], annotation_colors=colour_code, treeheight_row=0, fontsize = 5, fontsize_row = 5, fontsize_col = 5, cluster_rows = FALSE, show_colnames = FALSE, color = cols,fontsize_number=5, main='Hierarchical clustering of RNA-seq data on day 20 based on diet signature genes')
+heatmap.genelist<-rna2_day20_tf[rna2.geneShortList,]
+colnames(heatmap.genelist)<-as.character(rna2d_day20$Diet)
+```
+
+## Ecocyc analysis:
+
+  We create enrichment plots for top differentially regulated pathways identified by Ecocyc using the pairwise DEG lists generated here.
+
+```{r message=FALSE, warning=FALSE, fig.height=2.2, fig.width=3}
+ChowXStarch.pathway<-as.data.frame(read.table("data/Chow.Starch.pathway.txt", header=TRUE, sep = '\t'))
+ChowXStarch.pathway$p.values[ChowXStarch.pathway$group=='enriched.in.Chow']<-log10(ChowXStarch.pathway$p.values[ChowXStarch.pathway$group=='enriched.in.Chow'])*(-1)
+ChowXStarch.pathway$p.values[ChowXStarch.pathway$group=='enriched.in.Starch']<-log10(ChowXStarch.pathway$p.values[ChowXStarch.pathway$group=='enriched.in.Starch'])
+ChowXStarch.pathway<-ChowXStarch.pathway[order(ChowXStarch.pathway$p.values),]
+ChowXStarch.pathway.plot<-ggplot(ChowXStarch.pathway, aes(x=Pathway, y=p.values, size=number.of.genes, colour=group ))+geom_point()+coord_flip()+theme_pub+scale_size_continuous(range = c(1,3))+geom_hline(yintercept = (-1.30103), size=0.24)+geom_hline(yintercept = 0, size=0.24)+geom_hline(yintercept = 1.30103, size=0.24)+xlab("")+ylab("-log10 p-adjusted value")+ labs(size = "Genes detected")+scale_x_discrete(limits=ChowXStarch.pathway$Pathway)+scale_color_manual(values = c(as.character(colour_code$Diet[c(1,3)])))
+
+ChowXStarch.pathway.plot+plot_annotation()
+
+ChowXFat.pathway<-as.data.frame(read.table("data/Chow.Fat.pathway.txt", header=TRUE, sep = '\t'))
+ChowXFat.pathway$p.values[ChowXFat.pathway$group=='enriched.in.Chow']<-log10(ChowXFat.pathway$p.values[ChowXFat.pathway$group=='enriched.in.Chow'])*(-1)
+ChowXFat.pathway$p.values[ChowXFat.pathway$group=='enriched.in.Fat']<-log10(ChowXFat.pathway$p.values[ChowXFat.pathway$group=='enriched.in.Fat'])
+ChowXFat.pathway<-ChowXFat.pathway[order(ChowXFat.pathway$p.values),]
+ChowXFat.pathway.plot<-ggplot(ChowXFat.pathway, aes(x=Pathway, y=p.values, size=number.of.genes, colour=group ))+geom_point()+coord_flip()+theme_pub+scale_size_continuous(range = c(1,3))+geom_hline(yintercept = (-1.30103), size=0.24)+geom_hline(yintercept = 0, size=0.24)+geom_hline(yintercept = 1.30103, size=0.24)+xlab("")+ylab("-log10 p-adjusted value")+ labs(size = "Genes detected")+scale_x_discrete(limits=ChowXFat.pathway$Pathway)+scale_color_manual(values = c(as.character(colour_code$Diet[c(1,2)])))
+
+ChowXFat.pathway.plot+plot_annotation()
+
+FatXStarch.pathway<-as.data.frame(read.table("data/Fat.Starch.pathway.txt", header=TRUE, sep = '\t'))
+FatXStarch.pathway$p.values[FatXStarch.pathway$group=='enriched.in.Fat']<-log10(FatXStarch.pathway$p.values[FatXStarch.pathway$group=='enriched.in.Fat'])*(-1)
+FatXStarch.pathway$p.values[FatXStarch.pathway$group=='enriched.in.Starch']<-log10(FatXStarch.pathway$p.values[FatXStarch.pathway$group=='enriched.in.Starch'])
+FatXStarch.pathway<-FatXStarch.pathway[order(FatXStarch.pathway$p.values),]
+FatXStarch.pathway.plot<-ggplot(FatXStarch.pathway, aes(x=Pathway, y=p.values, size=number.of.genes, colour=group ))+geom_point()+coord_flip()+theme_pub+scale_size_continuous(range = c(1,3))+geom_hline(yintercept = (-1.30103), size=0.24)+geom_hline(yintercept = 0, size=0.24)+geom_hline(yintercept = 1.30103, size=0.24)+xlab("")+ylab("-log10 p-adjusted value")+ labs(size = "Genes detected")+scale_x_discrete(limits=FatXStarch.pathway$Pathway)+scale_color_manual(values = c(as.character(colour_code$Diet[c(2,3)])))
+
+FatXStarch.pathway.plot+plot_annotation()
+
+
+```
+# Checking reproducibility of classifier genes (DEGs)
+
+ We want to confirm that there is an overlap among the DEGs  identified in the two experimental replicates, and the direction of differential regulation is consistent. We use the genes that are upregulated/downregulated in the Chow group compared to the Starch group on day 7.
+ 
+```{r message=FALSE, warning=FALSE, fig.height = 3, fig.width = 3, fig.align = "center"}
+deseq.genes<-recoRdseq.filterDEG(rec1.de.vals[[2]], p = 0.1)
+edger.genes<-recoRdseq.filterDEG(rec1.ed.vals[[2]], p = 0.1)
+rec1.Chow.v.Starch.DEG<-data.frame(row.names = intersect(deseq.genes, edger.genes),geneID=intersect(deseq.genes, edger.genes), log2FC=rec1.de.vals[[2]][intersect(deseq.genes, edger.genes),4])
+
+deseq.genes<-recoRdseq.filterDEG(rec2.de.vals[[2]], p = 0.1)
+edger.genes<-recoRdseq.filterDEG(rec2.ed.vals[[2]], p = 0.1)
+rec2.Chow.v.Starch.DEG<-data.frame(row.names = intersect(deseq.genes, edger.genes),geneID=intersect(deseq.genes, edger.genes), log2FC=rec2.de.vals[[2]][intersect(deseq.genes, edger.genes),4])
+
+plot(euler(list(rec1 = rec1.Chow.v.Starch.DEG$geneID, rec2 = rec2.Chow.v.Starch.DEG$geneID)) , quantities=TRUE)
+
+```
+  Finally, we plot a correlation plot based on the log2FC detected for DEGs for the two experiments, and estimate the number of DEGs regulated in a similar direction.
+
+```{r message=FALSE, warning=FALSE, fig.height=2.2, fig.width=3}
+ DEG.compare<-data.frame(geneID=intersect(rec1.Chow.v.Starch.DEG$geneID, rec2.Chow.v.Starch.DEG$geneID))
+DEG.compare$geneID<-as.character(DEG.compare$geneID)
+DEG.compare$rec1_log2FC<-rec1.Chow.v.Starch.DEG[DEG.compare$geneID,2]
+DEG.compare$rec2_log2FC<-rec2.Chow.v.Starch.DEG[DEG.compare$geneID,2]
+DEG.compare<-DEG.compare[complete.cases(DEG.compare), ]
+r2<-round(cor(DEG.compare$rec1_log2FC, DEG.compare$rec2_log2FC)^2,2)
+n<-round(length(which(DEG.compare$rec1_log2FC*DEG.compare$rec2_log2FC>0))*100/length(DEG.compare$geneID))
+DEG.scatterplot<-ggplot(DEG.compare, aes(y=rec1_log2FC, x=rec2_log2FC))+geom_point(size=0.48, aes(colour='gray10'))+geom_smooth(method = 'lm', se = FALSE, size=0.48)+theme_pub+geom_hline(yintercept = 0, size=0.24)+geom_vline(xintercept = 0, size=0.24)+xlab("log2 fold change of DEGs detected in transient diet 2")+ylab("corresponding log2 fold change in transient diet 1")+annotate("text",  x=Inf, y = Inf, label = paste0("R^2 =",as.character(r2), " \n DEGs regulated in the same direction = ",as.character(n), "%"), vjust=1, hjust=1, size=3)+scale_color_manual(values = c('gray10'), guide='none')+ggtitle("Correlation of overlapping DEGs detected in both experiments")
+DEG.scatterplot+plot_annotation()
+```
+# Information about R session
+```{r message=FALSE, warning=FALSE}
+sessionInfo()
+```
