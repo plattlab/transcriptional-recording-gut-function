@@ -1,0 +1,19 @@
+Pathway	p.values	Matches	group	number.of.genes
+tdcR (serine/threonine util.)	7.26E-10	tdcG // "tdcF" // "tdcE" // "tdcC" // "tdcB" // "tdcA"	enriched.in.Fat	6
+Purine Nucleotide Degradation	2.50E-05	xdhC // "xdhB" // "xdhA" // "guaD" // "deoB"	enriched.in.Fat	5
+decR (cysteine detoxification)	5.06E-04	cyuP // "cyuA"	enriched.in.Fat	2
+gntR (gluconate util.)	0.002108852	idnT // "idnO" // "gntT"	enriched.in.Fat	3
+Fermentation to Alcohols	0.004072373	frdC // "frdB" // "eutE" // "tdcE"	enriched.in.Fat	4
+pspF (phae shock proteins)	0.009870024	pspC // "pspD"	enriched.in.Fat	2
+L-tryptophan degradation II (via pyruvate)	0.021043	tnaA	enriched.in.Fat	1
+Anaerobic Respiration	0.023398714	fdoI // "frdC" // "frdB" // "dmsB"	enriched.in.Fat	4
+nanR (sialic acid util.)	0.024385761	nanE // "nanM"	enriched.in.Fat	2
+nagC (amino alcohol util.)	0.03861251	eutP // "eutM" // "yqiB" // "nanM"	enriched.in.Fat	4
+Sugar Alcohol Degradation	2.70E-06	mtlD // "gatA" // "gatB" // "gatD" // "gpmM" // "eno" // "pykF"	enriched.in.Starch	7
+L-glutamate degradation IX (via 4-aminobutanoate)	6.33E-04	gadB // "gadA"	enriched.in.Starch	2
+kdpE (potassium transport)	0.003887843	kdpB // "kdpA"	enriched.in.Starch	2
+glycolysis I (from glucose 6-phosphate)	0.009502946	gpmM // "eno" // "pykF"	enriched.in.Starch	3
+Detoxification	0.0115456	grxB // "dkgB" // "gadB" // "gadA"	enriched.in.Starch	4
+mlc (maltose, mannose util.)	0.014080257	lamB // "malM" // "ptsI"	enriched.in.Starch	3
+flavin biosynthesis I (bacteria and plants)	0.016115637	ribD // "ribB"	enriched.in.Starch	2
+Cyclopropane Fatty Acid Biosynthesis	0.025617566	cfa	enriched.in.Starch	1

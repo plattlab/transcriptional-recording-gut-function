@@ -1,0 +1,21 @@
+Pathway	p.values	Matches	group	number.of.genes
+dgoR (galactonate util.)	3.17E-04	dgoK // dgoA // dgoD // dgoT	enriched.in.Chow	4
+cdaR (glucarate, galactarate, glycerate util.)	0.001054495	gudD // gudX // gudP // garK // garP	enriched.in.Chow	5
+Sulfoquinovose Degradation	0.002811106	yihQ // yihS // yihT	enriched.in.Chow	3
+rpsH-1 (ribosomal proteins)	0.002842241	secY // rplF // rpsH // rpsN // rplE	enriched.in.Chow	5
+L-glutamate degradation IX (via 4-aminobutanoate)	0.00464997	gadB // gadA	enriched.in.Chow	2
+ebgR (beta-galactoside util.)	0.008333297	ebgA // ebgC	enriched.in.Chow	2
+pdhR (pyruvate dehydrogenase complex)	0.011658859	lpxC // murE // mraZ // tomB // hha // cyoC // grcA // pdhR // aceF	enriched.in.Chow	9
+chbR (chitobiose util.)	0.012266745	chbR // chbA // chbC	enriched.in.Chow	3
+lipoate biosynthesis and incorporation II	0.013327641	fdx // lipA	enriched.in.Chow	2
+2-O-alpha-mannosyl-D-glycerate degradation	0.013327641	garK // mngB	enriched.in.Chow	2
+gntR (gluconate util.)	1.82E-06	idnT // idnO // nfuA // eda // edd // gntT	enriched.in.Fat	6
+D-Galacturonate Degradation	6.78E-06	eda // uxaC // uxaB // uxaA	enriched.in.Fat	4
+nanR (sialic acid util.)	2.56E-05	yjhC // nanE // nanT // nanM // nanC	enriched.in.Fat	5
+sedoheptulose bisphosphate bypass	0.001241668	fbaA // pfkA	enriched.in.Fat	2
+decR (cysteine detoxification)	0.001386263	cyuP // cyuA	enriched.in.Fat	2
+Purine Nucleotide Degradation	0.003651004	xdhB // xdhA // add // deoB	enriched.in.Fat	4
+rpsH-2 (ribosomal proteins)	0.008740241	rpmD // rpsE // rplN	enriched.in.Fat	3
+Anaerobic Respiration	0.010121633	fdoI // fdoG // frdC // dmsB // dmsA // napC	enriched.in.Fat	6
+Sugar Alcohol Degradation	0.015285519	gatZ // gatY // pfkA // fbaA	enriched.in.Fat	4
+pspF (phage shock proteins)	0.025739964	pspC // pspD	enriched.in.Fat	2

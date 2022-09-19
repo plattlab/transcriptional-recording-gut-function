@@ -1,11 +1,6 @@
 ---
 title: "Transient Diets I + II analysis - RNA-seq & Record-seq"
 output:
-    
-  github_document:
-    toc: yes
-    toc_depth: 2
-    
   html_notebook:
     df_print: paged
     toc: yes
@@ -13,26 +8,24 @@ output:
     toc_float: yes
     number_sections: yes
     code_folding: hide
-    theme: darkly
-    highlight: breezedark
-    
 ---
 # Introduction 
 
-This R notebook implements the analysis of the Record-seq and RNA-seq readout of the transient diet experiments described in 'Transcriptional Recordings in the gut' manuscript. The following files need to be stored in the directory `data` within the working directory: 
+This R notebook implements the analysis of the Record-seq and RNA-seq readout of the transient diet experiments described in 'Noninvasive assessment of gut function using transcriptional recording sentinel cells' manuscript. The following files are stored in the `data` directory within the working directory: 
 
     transient-diet/
         secondaryAnalysis.Rmd
         data/
-            transientDiet1_Recordseq_genomemapping.txt
-            transientDiet1_Recordseq_designmatrix.txt
-            transientDiet1_RNAseq_genomemapping.txt
-            transientDiet1_RNAseq_designmatrix.txt
-            transientDiet2_Recordseq_genomemapping.txt
-            transientDiet2_Recordseq_plasmidmapping.txt
-            transientDiet2_Recordseq_designmatrix.txt
-            transientDiet2_RNAseq_genomemapping.txt
-            transientDiet2_RNAseq_designmatrix.txt
+            transientDiet1_Recordseq_genomealigning.txt
+            transientDiet1_Recordseq_metadata.txt
+            transientDiet1_RNAseq_genomealigning.txt
+            transientDiet1_RNAseq_metadata.txt
+            transientDiet1_day14_RNAseq_genomealigning.txt
+            transientDiet1_day14_RNAseq_metadata.txt  
+            transientDiet2_Recordseq_genomealigning.txt
+            transientDiet2_Recordseq_metadata.txt
+            transientDiet2_RNAseq_genomealigning.txt
+            transientDiet2_RNAseq_metadata.txt
             Chow.Fat.pathway.txt
             Chow.Starch.pathway.txt
             Fat.Starch.pathway.txt
@@ -86,11 +79,11 @@ Data for the transient diet experiment with 14 days is analyzed first.
 
 ## Importing and pre-processing data for transient diet 1
 
-  We import the data matrices for both Record-seq and RNA-seq, filter them for lowly expressed genes as well as outlier samples with low cumulative counts, and use vst from _DESeq2_ to normalize and transform the data. 
+  We import the data matrices for both Record-seq and RNA-seq, filter them for lowly expressed genes as well as outlier samples with low cumulative counts, and use vst from _DESeq2_ to normalize and transform the data. We use a threshold of 10k counts for excluding Record-seq samples and 100k counts for excluding RNA-seq samples. 
 
 ```{r message=FALSE, warning=FALSE}
 rec1<-as.data.frame(read.table("data/transientDiet1_Recordseq_genomealigning.txt", header = TRUE))
-rec1d<-as.data.frame(read.table("data/transientDiet1_Recordseq_designmatrix.txt", header = TRUE))
+rec1d<-as.data.frame(read.table("data/transientDiet1_Recordseq_metadata.txt", header = TRUE))
 DEList<-recoRdseq.preprocess(rec1, rec1d, minCountsPerSample = 10000)
 rec1<-DEList[[1]]
 rec1d<-DEList[[2]]
@@ -99,14 +92,14 @@ rec1<-rec1[,rownames(rec1d)]
 rec1_tf<-recoRdseq.transform(rec1, rec1d,transformation = 'vst')
 
 rna1<-as.data.frame(read.table("data/transientDiet1_RNAseq_genomealigning.txt", header = TRUE))
-rna1d<-as.data.frame(read.table("data/transientDiet1_RNAseq_designmatrix.txt", header = TRUE))
+rna1d<-as.data.frame(read.table("data/transientDiet1_RNAseq_metadata.txt", header = TRUE))
 DEList<-recoRdseq.preprocess(rna1, rna1d, minCountsPerSample = 100000)
 rna1<-DEList[[1]]
 rna1d<-DEList[[2]]
 rna1_tf<-recoRdseq.transform(rna1, rna1d)
 rnadays<-unique(rna1d$Day)
 rna1_day14<-as.data.frame(read.table("data/transientDiet1_day14_RNAseq_genomealigning.txt", header = TRUE))
-rna1d_day14<-as.data.frame(read.table("data/transientDiet1_day14_RNAseq_designmatrix.txt", header = TRUE))
+rna1d_day14<-as.data.frame(read.table("data/transientDiet1_day14_RNAseq_metadata.txt", header = TRUE))
 rna1d_day14<-rna1d_day14[,1:3]
 DEList<-recoRdseq.preprocess(rna1_day14, rna1d_day14, minCountsPerSample = 100000)
 rna1_day14<-DEList[[1]]
@@ -273,7 +266,7 @@ colnames(rec1.global.DEG)[4]<-"log2FoldChange.max_SC"
 
 
 ## Plotting individual DEGs:
-  We plot vst-transformed genome-mapping spacer counts for 6 genes in the gntR pathway for chow and starch fed mice on day 7.
+  We plot vst-transformed genome-aligning spacer counts for 6 genes in the gntR pathway for chow and starch fed mice on day 7.
   
 ```{r message=FALSE, warning=FALSE, fig.height=2.2, fig.width=3}
 gntR_genes<-c('eda','edd', 'gntT', 'kdgT', 'gntU', 'gntK')
@@ -386,10 +379,11 @@ heatmap.rna1<-pheatmap(dheatmap, annotation_col = rna1d_day14[,1, drop=FALSE], a
   We now analyze data for the extended transient diet experiment with 20 days.
 
 ## Importing and pre-processing data for transient diet 2
-  We import the data matrices, filter them for lowly expressed genes as well as outlier samples with low cumulative counts, and use vst from DESeq2 to normalize and transform the data. We also exclude day1 from the analysis since we have emperically observed that the data are noisy for the first day of colonization.
+  We import the data matrices, filter them for lowly expressed genes as well as outlier samples with low cumulative counts, and use vst from DESeq2 to normalize and transform the data. We also exclude day1 from the analysis since we have emperically observed that the data are noisy for the first day of colonization. We use the same thresholds as the previous experiment for consistency.
+  
 ```{r message=FALSE, warning=FALSE, fig.height=2.2, fig.width=3}
 rec2<-as.data.frame(read.table("data/transientDiet2_Recordseq_genomealigning.txt", header = TRUE))
-rec2d<-as.data.frame(read.table("data/transientDiet2_Recordseq_designmatrix.txt", header = TRUE))
+rec2d<-as.data.frame(read.table("data/transientDiet2_Recordseq_metadata.txt", header = TRUE))
 DEList<-recoRdseq.preprocess(rec2, rec2d, minCountsPerSample = 10000)
 rec2<-DEList[[1]]
 rec2d<-DEList[[2]]
@@ -397,7 +391,7 @@ rec2d<-rec2d[rec2d$Day>1,]
 rec2<-rec2[,rownames(rec2d)]
 rec2_tf<-recoRdseq.transform(rec2, rec2d)
 rna2<-as.data.frame(read.table("data/transientDiet2_RNAseq_genomealigning.txt", header = TRUE))
-rna2d<-as.data.frame(read.table("data/transientDiet2_RNAseq_designmatrix.txt", header = TRUE))
+rna2d<-as.data.frame(read.table("data/transientDiet2_RNAseq_metadata.txt", header = TRUE))
 rna2d<-rna2d[,1:3]
 DEList<-recoRdseq.preprocess(rna2, rna2d, minCountsPerSample = 100000)
 rna2<-DEList[[1]]
@@ -583,7 +577,7 @@ colnames(rec2.global.DEG)[4]<-"log2FoldChange.max_SC"
  
  
 ## Plotting individual DEGs:
-  We plot vst-transformed genome-mapping spacer counts for 5 genes in the gntR pathway for chow and starch fed mice on day 7.
+  We plot vst-transformed genome-aligning spacer counts for 6 genes in the gntR pathway for chow and starch fed mice on day 7.
   
 ```{r message=FALSE, warning=FALSE, fig.height=2.2, fig.width=3}
 gntR_genes<-c('eda','edd', 'gntT', 'kdgT', 'gntU', 'gntK')
@@ -591,7 +585,7 @@ de<-rec2d_day7[rec2d_day7$Diet!='Fat',]
 dt<-rec2_day7tf[gntR_genes, rownames(de)]
 rec2.gntR.plot.df<-data.frame(Diet=de$Diet, t(dt))
 rec2.gntR.plot.df<-melt(rec2.gntR.plot.df, id.vars = 'Diet')
-rec2.gntR.plot<-ggplot(rec2.gntR.plot.df, aes(y=value, x=variable, fill=Diet, color='black'))+geom_boxplot(size=0.24, outlier.size=0)+geom_point(size=0.48, position = position_dodge(0.75))+theme_pub+ylab("gene-mapping spacer counts (vst-transformed)")+xlab("gene")+ggtitle("Record-seq counts on day 7 for gntR gene")+scale_fill_manual(values = as.vector(colour_code$Diet[c(1,3)]))+scale_color_manual(values = c("black"), guide='none')
+rec2.gntR.plot<-ggplot(rec2.gntR.plot.df, aes(y=value, x=variable, fill=Diet, color='black'))+geom_boxplot(size=0.24, outlier.size=0)+geom_point(size=0.48, position = position_dodge(0.75))+theme_pub+ylab("gene-aligning spacer counts (vst-transformed)")+xlab("gene")+ggtitle("Record-seq counts on day 7 for gntR gene")+scale_fill_manual(values = as.vector(colour_code$Diet[c(1,3)]))+scale_color_manual(values = c("black"), guide='none')
 rec2.gntR.plot+plot_annotation()
 
 ```

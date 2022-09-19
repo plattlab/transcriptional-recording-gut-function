@@ -1,0 +1,21 @@
+Pathway	p.values	Matches	group	number.of.genes
+tdcR (serine/threonine util.)	2.16E-07	tdcG // "tdcF" // "tdcE" // "tdcD" // "tdcC" // "tdcB" // "tdcA"	enriched.in.Chow	7
+dgoR (galactonate util.)	1.76E-05	dgoR // "dgoK" // "dgoA" // "dgoD" // "dgoT"	enriched.in.Chow	5
+cdaR (glucarate, galactarate, glycerate util.)	2.75E-04	gudD // "gudX" // "gudP" // "garK" // "garL" // "garP"	enriched.in.Chow	6
+Sulfoquinovose Degradation	4.03E-04	yihQ // "yihS" // "yihU" // "yihT"	enriched.in.Chow	4
+L-arabinose degradation I	9.15E-04	araB // "araD" // "araA"	enriched.in.Chow	3
+relE (toxin/antitoxin system)	0.001415753	hokD // "relE" // "relB"	enriched.in.Chow	3
+lsrR (quorum sensing)	0.001505477	lsrG // "lsrB" // "lsrD" // "lsrC" // "lsrA"	enriched.in.Chow	5
+galR (galactose util.)	0.002735577	mglC // "mglA" // "mglB" // "galT" // "galE"	enriched.in.Chow	5
+Nucleoside and Nucleotide Degradation	0.003624648	ppnN // "rihA" // "rihC" // "xdhC" // "xdhB" // "xdhA" // "deoD" // "guaD" // "eutE" // "deoC"	enriched.in.Chow	10
+rbsR (ribose util.)	0.004557861	rbsD // "rbsA" // "rbsC" // "rbsB" // "rbsK"	enriched.in.Chow	5
+Sugar Alcohol Degradation	3.05E-06	mtlD // "gatA" // "gatB" // "gatD" // "gatZ" // "pfkA" // "fbaA" // "pgk" // "gpmM" // "eno" // "pykF"	enriched.in.Starch	11
+D-Galacturonate Degradation	0.004336574	eda // "uxaC" // "uxaA"	enriched.in.Starch	3
+yqhC (furfural tolerance)	0.005405313	dkgA // "yqhD"	enriched.in.Starch	2
+Tetrapyrrole Biosynthesis	0.00542951	gltX // "hemL" // "hemB" // "hemC"	enriched.in.Starch	4
+L-glutamate degradation IX (via 4-aminobutanoate)	0.006268663	gadB // "gadA"	enriched.in.Starch	2
+KdpDE Two-Component Signal Transduction System, potassium-dependent	0.006268663	kdpD // "kdpE"	enriched.in.Starch	2
+narL (anaerobic respiration)	0.006858423	appB // "hyaA" // "hyaB" // "dmsD" // "ynfF" // "ynfE" // "nrfB" // "nuoM" // "pflB" // "focA" // "caiD" // "caiC" // "adhE" // "napC" // "dmsA" // "dmsB" // "narH" // "narJ" // "narI"	enriched.in.Starch	19
+gntR (gluconate util.)	0.008844518	gntU // "eda" // "edd" // "gntT"	enriched.in.Starch	4
+rpsH (ribosomal proteins)	0.008844518	rpmD // "rpsE" // "rpsN" // "rplN"	enriched.in.Starch	4
+fhlA	0.019778825	fhlA // "hypA" // "hypB" // "hypC" // "hypD" // "focB"	enriched.in.Starch	6
