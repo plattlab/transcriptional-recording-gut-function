@@ -5,9 +5,6 @@ It builds upon the pipeline described in our <em>Nature Protocols</em> [paper](h
 
 The raw sequencing data for this project are available here: Bioproject [PRJNA807096](https://www.ncbi.nlm.nih.gov/bioproject/PRJNA807096) and SRA [SRP364805](https://www.ncbi.nlm.nih.gov/sra/?term=SRP364805). 
 
-We will be adding additional details for the `primary-analysis` pipeline and a global metadata file `transcriptional-recording-gut-metadata.txt` soon.
-The metadata will follow this logical structure: \
-`type of experiment` &harr; `experiment name` &harr; `SRA accession` &harr; `sample name` &harr; `sample attributes`
 
 The workflow is `primary-analysis` &rarr; `secondary-analysis`
 
